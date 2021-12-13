@@ -1,0 +1,112 @@
+version: "3"
+services:
+
+  nginx:
+      build:
+        context: ./nginx
+      ports:
+        - "80:80"
+      deploy:
+        replicas: 1
+      depends_on: 
+        - "logstash"
+      volumes:
+        - ./nginx:/usr/share/nginx/html
+        - ./nginx/nginx.conf:/etc/nginx/nginx.conf 
+      links:
+        - "logstash"
+      logging:
+        driver: "logstash"
+        options:
+          logstash-address: localhost:5000
+          tag: httpd.access
+      networks:
+        - elk-nginx
+
+  #generator
+  nginx-generator:
+      build:
+        context: ./generator
+      depends_on: 
+        - "nginx"
+      networks:
+        - elk-nginx
+
+  logstash:
+    build:
+      context: logstash/
+      args:
+        ELK_VERSION: 7.15.0
+    volumes:
+      - type: bind
+        source: ./logstash/config/logstash.yml
+        target: /usr/share/logstash/config/logstash.yml
+        read_only: true
+      - type: bind
+        source: ./logstash/pipeline
+        target: /usr/share/logstash/pipeline
+        read_only: true
+    ports:
+      - "5000:5000"
+      - "9600:9600"
+    expose:
+      - "5044"
+    environment:
+      LS_JAVA_OPTS: "-Xmx512m -Xms512m"
+    networks:
+      - elk-nginx
+    depends_on:
+      - elasticsearch
+  # logstash:
+  #     build:
+  #       context: ./logstash
+  #     ports:
+  #       - "24224:24224"
+  #       - "24224:24224/udp"
+  #     depends_on: 
+  #       - "elasticsearch"
+  #     networks:
+  #       - elk-nginx
+  #     volumes:
+  #       - ./fluentd/etc:/fluentd/etc
+
+  elasticsearch:
+    image: "docker.elastic.co/elasticsearch/elasticsearch:7.15.0"
+    ports:
+      - "9200:9200"
+    expose:
+      - 9200
+    volumes:
+      - ./elasticsearch:/usr/share/elasticsearch/data
+    networks:
+      - elk-nginx
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+
+
+  kibana:
+    image : "docker.elastic.co/kibana/kibana:7.15.0"
+    links:
+      - "elasticsearch"
+    environment:
+      ELASTICSEARCH_HOST: http://elasticsearch:9200
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - elk-nginx
+
+  
+
+  
+
+
+
+networks:
+  elk-nginx:
+    # driver: bridge
+
+volumes:
+  elasticsearch-volume:
