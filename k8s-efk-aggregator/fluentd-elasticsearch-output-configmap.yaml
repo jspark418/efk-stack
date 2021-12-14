@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-elasticsearch-output
+  namespace: k8s-system-logging
+data:
+  fluentd.conf: |
+    # Prometheus Exporter Plugin
+    # input plugin that exports metrics
+    <source>
+      @type prometheus
+      port 24231
+    </source>
+
+    # input plugin that collects metrics from MonitorAgent
+    <source>
+      @type prometheus_monitor
+      <labels>
+        host \${hostname}
+      </labels>
+    </source>
+
+    # input plugin that collects metrics for output plugin
+    <source>
+      @type prometheus_output_monitor
+      <labels>
+        host \${hostname}
+      </labels>
+    </source>
+
+    # Ignore fluentd own events
+    <match fluent.**>
+      @type null
+    </match>
+
+    # TCP input to receive logs from the forwarders
+    <source>
+      @type forward
+      bind 0.0.0.0
+      port 24224
+    </source>
+
+    # HTTP input for the liveness and readiness probes
+    <source>
+      @type http
+      bind 0.0.0.0
+      port 9880
+    </source>
+
+    # Throw the healthcheck to the standard output instead of forwarding it
+    <match fluentd.healthcheck>
+      @type stdout
+    </match>
+
+    # rewrite tags based on which namespace the logs come from.
+    <match kube.**>
+      @type rewrite_tag_filter
+      <rule>
+        key     \$['kubernetes']['namespace_name']
+        pattern /^(kube-system|kubeapps|k8s-system-[\S]+)$/
+        tag     ops.\${tag}
+      </rule>
+      <rule>
+        key     \$['kubernetes']['namespace_name']
+        pattern /.+/
+        tag     prod.\${tag}
+      </rule>
+    </match>
+
+    <match ops.kube.**>
+      @type copy
+      @id output_copy_ops
+      <store>
+        @type elasticsearch_dynamic
+        @id output_elasticsearch_ops
+        host <elasticsearch-host>
+        port 9200
+        logstash_format true
+        logstash_prefix kube-ops.\${record['kubernetes']['namespace_name']}
+        <buffer>
+          @type file
+          path /opt/bitnami/fluentd/logs/buffers/ops-logs.buffer
+          flush_thread_count 2
+          flush_interval 5s
+        </buffer>
+      </store>
+    </match>
+
+    <match prod.kube.**>
+      @type copy
+      @id output_copy
+      <store>
+        @type elasticsearch_dynamic
+        @id output_elasticsearch
+        host <elasticsearch-host>
+        port 9200
+        logstash_format true
+        logstash_prefix kube.\${record['kubernetes']['namespace_name']}
+        <buffer>
+          @type file
+          path /opt/bitnami/fluentd/logs/buffers/logs.buffer
+          flush_thread_count 2
+          flush_interval 5s
+        </buffer>
+      </store>
+    </match>
