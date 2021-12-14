@@ -1,0 +1,155 @@
+on_minikube: false
+
+image:
+  fluent_bit:
+    repository: fluent/fluent-bit
+    tag: v1.3.7
+  pullPolicy: Always
+
+# When enabled, exposes json and prometheus metrics on {{ .Release.Name }}-metrics service
+metrics:
+  enabled: true
+  service:
+    labels:
+       k8s-app: fluent-bit
+    annotations:
+      'prometheus.io/path': "/api/v1/metrics/prometheus"
+      'prometheus.io/port': "2020"
+      'prometheus.io/scrape': "true"
+    port: 2020
+    type: ClusterIP
+  serviceMonitor:
+    enabled: false
+    additionalLabels: {}
+    # namespace: monitoring
+    # interval: 30s
+    # scrapeTimeout: 10s
+
+backend:
+  type: forward
+  forward:
+    host: fluentd-0.lab.spodon.com
+    port: 24224
+    tls: "off"
+    tls_verify: "on"
+    tls_debug: 1
+    shared_key: thisisunsafe
+
+parsers:
+  enabled: true
+  ## List the respective parsers in key: value format per entry
+  ## Regex required fields are name and regex. JSON and Logfmt required field
+  ## is name.
+  regex:
+    - name: cri-mod
+      regex: "^(?<time>[^ ]+) (?<stream>stdout|stderr) (?<logtag>[^ ]*) (?<log>.*)$"
+      timeFormat: "%Y-%m-%dT%H:%M:%S.%L%z"
+      timeKey: time
+    - name: catchall
+      regex: "^(?<message>.*)$ }"
+  logfmt: []
+  json: []
+
+env: []
+podAnnotations: {}
+fullConfigMap: false
+existingConfigMap: ""
+rawConfig: |-
+  @INCLUDE fluent-bit-service.conf
+  @INCLUDE fluent-bit-input.conf
+  @INCLUDE fluent-bit-filter.conf
+  @INCLUDE fluent-bit-output.conf
+
+extraEntries:
+  input: ""
+  audit: ""
+  filter: |
+    Merge_Parser     catchall
+    Keep_Log         Off
+  output: ""
+
+extraPorts: []
+
+extraVolumes: []
+
+extraVolumeMounts: []
+
+resources: {}
+hostNetwork: false
+dnsPolicy: ClusterFirst
+tolerations: []
+nodeSelector: {}
+affinity: {}
+service:
+  flush: 1
+  logLevel: info
+
+input:
+  tail:
+    memBufLimit: 5MB
+    parser: cri-mod
+    path: /var/log/containers/*.log
+    ignore_older: ""
+  systemd:
+    enabled: false
+    filters:
+      systemdUnit:
+        - docker.service
+        - kubelet.service
+        - node-problem-detector.service
+    maxEntries: 1000
+    readFromTail: true
+    stripUnderscores: false
+    tag: host.*
+
+audit:
+  enable: false
+  input:
+    memBufLimit: 35MB
+    parser: docker
+    tag: audit.*
+    path: /var/log/kube-apiserver-audit.log
+    bufferChunkSize: 2MB
+    bufferMaxSize: 10MB
+    skipLongLines: true
+    key: kubernetes-audit
+
+filter:
+  kubeURL: https://kubernetes.default.svc:443
+  kubeCAFile: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+  kubeTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+  kubeTag: kube
+  kubeTagPrefix: kube.var.log.containers.
+  mergeJSONLog: true
+  mergeLogKey: ""
+  enableParser: true
+  enableExclude: true
+  useJournal: false
+
+rbac:
+  create: true
+  pspEnabled: false
+
+taildb:
+  directory: /var/lib/fluent-bit
+
+serviceAccount:
+  # Specifies whether a ServiceAccount should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the ServiceAccount to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name:
+
+## Specifies security settings for a container
+## Ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+securityContext: {}
+  # securityContext:
+  #   privileged: true
+
+## Specifies security settings for a pod
+## Ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+podSecurityContext: {}
+  # podSecurityContext:
+  #   runAsUser: 1000
